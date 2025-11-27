@@ -21,10 +21,11 @@ type VideoInfo struct {
 func DurationToTimestamp(vinfo *VideoInfo) (string, error) {
 	sl := strings.Split(vinfo.Format.Duration, ".")
 
-	rem, err := strconv.Atoi(sl[1])
+	rem, err := strconv.Atoi(sl[1][0:2])
 	if err != nil {
-		return "", errors.Wrap(err, "failed to parse rem")
+		return "", errors.Wrap(err, "failed to convert rem from string to int")
 	}
+
 	framerate, err := strconv.Atoi(strings.Split(vinfo.Streams[0].FrameRate, "/")[0])
 	if err != nil {
 		return "", errors.Wrap(err, "framerate not recognized")
@@ -34,13 +35,19 @@ func DurationToTimestamp(vinfo *VideoInfo) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "parse time")
 	}
-
 	for rem >= framerate {
 		t.Add(1 * time.Second)
 		rem -= framerate
 	}
 
-	tm := t.Format("03:04:05")
+	tm := t.Format("15:04:05")
+
+	frames := strconv.Itoa(rem)
+	if len(frames) < 2 {
+		frames += "0"
+	}
+
+	tm += ":" + frames
 
 	return tm, nil
 }

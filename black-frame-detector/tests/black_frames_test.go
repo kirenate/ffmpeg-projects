@@ -15,9 +15,8 @@ func TestGetVideoTimestamp(t *testing.T) {
 }
 
 func TestDurationToTimestamp(t *testing.T) {
-	info, err := process.GetVideoInfo("./../testdata.mp4")
+	info, err := process.GetVideoInfo("./../output_red.mp4")
 	require.NoError(t, err)
-	fmt.Println(info)
 	require.NotEmpty(t, info)
 
 	tm, err := process.DurationToTimestamp(info)
