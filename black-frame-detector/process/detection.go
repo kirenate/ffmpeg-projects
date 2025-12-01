@@ -7,11 +7,16 @@ import (
 	"os"
 )
 
-func GetVideoMetadata(filename string) ([]byte, error) {
+func GetVideoMetadata(filename string) (chan []byte, chan error, chan interface{}) {
+	wChan := make(chan []byte)
+	errChan := make(chan error)
+	done := make(chan interface{})
+
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
-		return nil, errors.Wrap(err, "pipe")
+		errChan <- errors.Wrap(err, "pipe create")
+		return nil, nil, nil
 	}
 	os.Stdout = w
 
@@ -24,29 +29,47 @@ func GetVideoMetadata(filename string) ([]byte, error) {
 
 	cmd := ffmpeg.Input(filename, inputKwargs).
 		Output("out.null", outputKwargs).
-		WithOutput(w).
-		ErrorToStdOut()
+		WithErrorOutput(w)
 
 	err = cmd.Run()
 
 	if err != nil {
-		return nil, errors.Wrap(err, "cmd failed")
+		errChan <- errors.Wrap(err, "cmd failed")
+		return nil, nil, nil
 	}
 
 	err = w.Close()
 	if err != nil {
-		return nil, errors.Wrap(err, "close w")
+		errChan <- errors.Wrap(err, "close w")
+		return nil, nil, nil
 	}
 
-	res, err := io.ReadAll(r)
-	if err != nil {
-		return nil, errors.Wrap(err, "reading")
-	}
+	go func() {
 
-	os.Stdout = oldStdout
+		var errLoop error
+		for !errors.Is(errLoop, io.EOF) {
+			buf := make([]byte, 10)
 
-	return res, nil
+			_, errLoop = io.ReadAtLeast(r, buf, 10)
+			if errLoop != nil && !errors.Is(errLoop, io.EOF) {
+				errChan <- errLoop
+				break
+			}
+
+			wChan <- buf
+
+		}
+
+		os.Stdout = oldStdout
+		close(wChan)
+		close(errChan)
+		close(done)
+	}()
+
+	return wChan, errChan, done
+
 }
 
-func ExtractBlackFramesFromMetadata(meta []byte) ([]byte, error) {
-}
+//
+//func ExtractBlackFramesFromMetadata(meta []byte) ([]byte, error) {
+//}
