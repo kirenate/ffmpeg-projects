@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"github.com/pkg/errors"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
+	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,38 +20,52 @@ type VideoInfo struct {
 	} `json:"streams"`
 }
 
-func DurationToTimestamp(vinfo *VideoInfo) (string, error) {
-	sl := strings.Split(vinfo.Format.Duration, ".")
+func DurationToTimestamp(filename string, in <-chan string, wg *sync.WaitGroup) chan string {
+	out := make(chan string)
 
-	rem, err := strconv.Atoi(sl[1][0:2])
-	if err != nil {
-		return "", errors.Wrap(err, "failed to convert rem from string to int")
-	}
+	go func() {
+		defer wg.Done()
 
-	framerate, err := strconv.Atoi(strings.Split(vinfo.Streams[0].FrameRate, "/")[0])
-	if err != nil {
-		return "", errors.Wrap(err, "framerate not recognized")
-	}
+		vinfo, err := GetVideoInfo(filename)
+		if err != nil {
+			log.Println("get video info", err.Error())
+			return
+		}
 
-	t, err := time.Parse("5", sl[0])
-	if err != nil {
-		return "", errors.Wrap(err, "parse time")
-	}
-	for rem >= framerate {
-		t.Add(1 * time.Second)
-		rem -= framerate
-	}
+		framerate, err := strconv.Atoi(strings.Split(vinfo.Streams[0].FrameRate, "/")[0])
+		if err != nil {
+			log.Println("framerate not recognized", err.Error())
+			return
+		}
 
-	tm := t.Format("15:04:05")
+		for data := range in {
+			d, err := strconv.Atoi(data)
+			if err != nil {
+				log.Println("strconv", err.Error())
+				return
+			}
 
-	frames := strconv.Itoa(rem)
-	if len(frames) < 2 {
-		frames += "0"
-	}
+			t, err := time.Parse("5", strconv.Itoa(d/framerate))
+			if err != nil {
+				log.Println("parse time", err.Error())
+			}
 
-	tm += ":" + frames
+			tm := t.Format("15:04:05")
+			
+			frames := strconv.Itoa(d % framerate)
+			if len(frames) < 2 {
+				frames = "0" + frames
+			}
 
-	return tm, nil
+			tm += ":" + frames
+
+			out <- tm
+		}
+
+		close(out)
+	}()
+
+	return out
 }
 
 func GetVideoInfo(filename string) (*VideoInfo, error) {

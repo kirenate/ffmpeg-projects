@@ -4,21 +4,24 @@ import (
 	"github.com/pkg/errors"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 	"io"
+	"log"
 	"os"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
 )
 
-func GetVideoMetadata(filename string) (chan []byte, chan error, chan interface{}) {
-	wChan := make(chan []byte)
-	errChan := make(chan error)
-	done := make(chan interface{})
+func GetVideoMetadata(filename string, wg *sync.WaitGroup) (chan []byte, error) {
+	logger := log.Default()
+	logger.SetOutput(os.Stderr)
 
-	oldStdout := os.Stdout
+	out := make(chan []byte)
+
 	r, w, err := os.Pipe()
 	if err != nil {
-		errChan <- errors.Wrap(err, "pipe create")
-		return nil, nil, nil
+		return nil, errors.Wrap(err, "pipe create")
 	}
-	os.Stdout = w
 
 	inputKwargs := ffmpeg.KwArgs{}
 	inputKwargs["hide_banner"] = ""
@@ -32,44 +35,60 @@ func GetVideoMetadata(filename string) (chan []byte, chan error, chan interface{
 		WithErrorOutput(w)
 
 	err = cmd.Run()
-
 	if err != nil {
-		errChan <- errors.Wrap(err, "cmd failed")
-		return nil, nil, nil
+		return nil, errors.Wrap(err, "cmd failed")
 	}
 
 	err = w.Close()
 	if err != nil {
-		errChan <- errors.Wrap(err, "close w")
-		return nil, nil, nil
+		return nil, errors.Wrap(err, "close w")
 	}
 
 	go func() {
+		defer wg.Done()
 
-		var errLoop error
-		for !errors.Is(errLoop, io.EOF) {
+		for !errors.Is(err, io.ErrUnexpectedEOF) {
 			buf := make([]byte, 10)
 
-			_, errLoop = io.ReadAtLeast(r, buf, 10)
-			if errLoop != nil && !errors.Is(errLoop, io.EOF) {
-				errChan <- errLoop
+			_, err = io.ReadAtLeast(r, buf, 10)
+			if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+				logger.Println("readAtLeast: ", err.Error())
 				break
 			}
 
-			wChan <- buf
+			out <- buf
 
 		}
 
-		os.Stdout = oldStdout
-		close(wChan)
-		close(errChan)
-		close(done)
+		close(out)
 	}()
 
-	return wChan, errChan, done
+	return out, nil
 
 }
 
-//
-//func ExtractBlackFramesFromMetadata(meta []byte) ([]byte, error) {
-//}
+func ExtractBlackFramesFromMetadata(in <-chan []byte, wg *sync.WaitGroup) chan string {
+	out := make(chan string)
+
+	reg := regexp.MustCompile(` frame:[0-9]{3,}`)
+
+	go func() {
+		defer wg.Done()
+
+		var str []byte
+		var tmp string
+		for data := range in {
+			str = slices.Concat(str, data)
+			stamp := reg.Find(str)
+			if stamp != nil {
+				tmp, _ = strings.CutPrefix(string(stamp), " frame:")
+				out <- tmp
+				str = []byte{}
+			}
+		}
+
+		close(out)
+	}()
+
+	return out
+}
