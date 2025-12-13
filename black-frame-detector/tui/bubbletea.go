@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pkg/errors"
+	"os"
 )
 
 type Model struct {
@@ -49,8 +51,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func mustLog(v string) {
+	file, err := os.OpenFile("/tmp/out.log", os.O_RDWR, 0)
+	if err != nil {
+		file, err = os.Create("/tmp/out.log")
+		if err != nil {
+			panic(errors.Wrap(err, "failed to open and create"))
+		}
+	}
+
+	defer file.Close()
+
+	_, err = file.WriteString(v)
+	if err != nil {
+		panic(errors.Wrap(err, "failed to write string"))
+	}
+}
+
 func (m Model) View() string {
-	var s string
+	mustLog(fmt.Sprintf("%+v", m.choices))
+
+	s := "Detecting black frames. . .\n\n"
 	var prefix string
 
 	for i, data := range m.choices {
@@ -59,8 +80,11 @@ func (m Model) View() string {
 			prefix = "---"
 		}
 
-		s += fmt.Sprintf("%s%s\n", prefix, data)
+		s += fmt.Sprintf("%v %s %s\n", i, prefix, data)
 	}
 
+	s += "\nPress ctrl+C or q to exit\n"
+
+	mustLog(s)
 	return s
 }

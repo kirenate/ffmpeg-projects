@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"main.go/process"
 	"main.go/tui"
@@ -26,6 +27,15 @@ func main() {
 
 	wg.Add(4)
 
+	go func() {
+		defer wg.Done()
+
+		_, err := p.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
 	in, err := process.GetVideoMetadata(inputPath, &wg)
 	if err != nil {
 		panic(err)
@@ -35,16 +45,8 @@ func main() {
 
 	timecode := process.DurationToTimestamp(inputPath, out, &wg)
 
-	go func(wg *sync.WaitGroup) {
-		defer wg.Done()
-
-		_, err := p.Run()
-		if err != nil {
-			panic(err)
-		}
-	}(&wg)
-
 	for data := range timecode {
+		fmt.Println("sent", data)
 		p.Send(data)
 	}
 
